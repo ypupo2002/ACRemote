@@ -34,7 +34,7 @@ const char *PARAM_MESSAGE = "message";
 
 IRGreeAC ac(kIrLed);
 AsyncWebServer server(httpPort);
-DHT dht(DHT_PIN, DHT11);
+DHT_Unified dht(DHT_PIN, DHT11);
 
 void printState()
 {
@@ -303,16 +303,19 @@ void savePresetToFS(String name)
     data.swing.pos = ac.getSwingVerticalPosition();
 
     auto presetFile = LittleFS.open("/presets/" + name, "w");
-    presetFile.write((uint8_t*)&data, sizeof(data));
+    presetFile.write((uint8_t *)&data, sizeof(data));
     presetFile.close();
 }
 
-void loadPresetFromFS(String name) {
+void loadPresetFromFS(String name)
+{
     presetData data;
-    if (LittleFS.exists("/presets/"+name)) {
-        auto presetFile = LittleFS.open("/presets/"+name, "r");
-        auto readed = presetFile.read((uint8_t*)&data, sizeof(data));
-        if (readed == sizeof(data)) {
+    if (LittleFS.exists("/presets/" + name))
+    {
+        auto presetFile = LittleFS.open("/presets/" + name, "r");
+        auto readed = presetFile.read((uint8_t *)&data, sizeof(data));
+        if (readed == sizeof(data))
+        {
             ac.setPower(data.power);
             ac.setTemp(data.temp);
             ac.setFan(data.fan);
@@ -351,15 +354,53 @@ void loadPreset(AsyncWebServerRequest *request)
     }
 }
 
-void getDTHSensorValues(AsyncWebServerRequest *request) 
-{
-    auto temp = dht.readTemperature();
-    auto hum = dht.readHumidity();
-    Serial.println("readed");
-    StaticJsonDocument<200> doc;
+unsigned long interval = 10 * 1000;
+unsigned long previusMillis = 0;
+float temperature= 0;
+float humidity = 0;
 
-    doc["temperature"] = temp;
-    doc["humidity"] = hum;
+void readDHT()
+{
+    auto currentMillis = millis();
+
+    if (previusMillis != 0 && (currentMillis - previusMillis) < interval)
+        return;
+
+    previusMillis = currentMillis;
+
+    sensors_event_t event;
+    dht.temperature().getEvent(&event);
+    if (isnan(event.temperature))
+    {
+        Serial.println(F("Error reading temperature!"));
+    }
+    else
+    {
+        //Serial.print(F("Temperature: "));
+        //Serial.print(event.temperature);
+        temperature = event.temperature;
+        //Serial.println(F("°C"));
+    }
+    // Get humidity event and print its value.
+    dht.humidity().getEvent(&event);
+    if (isnan(event.relative_humidity))
+    {
+        Serial.println(F("Error reading humidity!"));
+    }
+    else
+    {
+        // Serial.print(F("Humidity: "));
+        // Serial.print(event.relative_humidity);
+        // Serial.println(F("%"));
+        humidity = event.relative_humidity;
+    }
+}
+
+void getDTHSensorValues(AsyncWebServerRequest *request)
+{
+    StaticJsonDocument<200> doc;
+    doc["temperature"] = temperature;
+    doc["humidity"] = humidity;
 
     String result;
     serializeJson(doc, result);
@@ -383,7 +424,8 @@ void setupAPI()
     server.onNotFound(notFound);
 }
 
-void setupACRemote() {
+void setupACRemote()
+{
     ac.begin();
     delay(200);
 
@@ -400,6 +442,52 @@ void setupACRemote() {
     // printState();
 }
 
+void setupDHT()
+{
+    dht.begin();
+    Serial.println(F("DHTxx Unified Sensor Example"));
+    // Print temperature sensor details.
+    sensor_t sensor;
+    dht.temperature().getSensor(&sensor);
+    Serial.println(F("------------------------------------"));
+    Serial.println(F("Temperature Sensor"));
+    Serial.print(F("Sensor Type: "));
+    Serial.println(sensor.name);
+    Serial.print(F("Driver Ver:  "));
+    Serial.println(sensor.version);
+    Serial.print(F("Unique ID:   "));
+    Serial.println(sensor.sensor_id);
+    Serial.print(F("Max Value:   "));
+    Serial.print(sensor.max_value);
+    Serial.println(F("°C"));
+    Serial.print(F("Min Value:   "));
+    Serial.print(sensor.min_value);
+    Serial.println(F("°C"));
+    Serial.print(F("Resolution:  "));
+    Serial.print(sensor.resolution);
+    Serial.println(F("°C"));
+    Serial.println(F("------------------------------------"));
+    // Print humidity sensor details.
+    dht.humidity().getSensor(&sensor);
+    Serial.println(F("Humidity Sensor"));
+    Serial.print(F("Sensor Type: "));
+    Serial.println(sensor.name);
+    Serial.print(F("Driver Ver:  "));
+    Serial.println(sensor.version);
+    Serial.print(F("Unique ID:   "));
+    Serial.println(sensor.sensor_id);
+    Serial.print(F("Max Value:   "));
+    Serial.print(sensor.max_value);
+    Serial.println(F("%"));
+    Serial.print(F("Min Value:   "));
+    Serial.print(sensor.min_value);
+    Serial.println(F("%"));
+    Serial.print(F("Resolution:  "));
+    Serial.print(sensor.resolution);
+    Serial.println(F("%"));
+    Serial.println(F("------------------------------------"));
+}
+
 void setup()
 {
     Serial.begin(115200);
@@ -412,12 +500,15 @@ void setup()
 
     setupACRemote();
 
-    dht.begin();
+    setupDHT();
+
+    server.begin();
 }
 
 void loop()
 {
-    server.begin();
+    readDHT();
+
     //  ac.setLight(true);
     //  ac.setDisplayTempSource(kGreeDisplayTempSet);
     //  ac.send();
